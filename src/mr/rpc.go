@@ -6,24 +6,48 @@ package mr
 // remember to capitalize all names.
 //
 
-import "os"
-import "strconv"
+import (
+	"os"
+	"strconv"
+)
 
-//
-// example to show how to declare the arguments
-// and reply for an RPC.
-//
-
-type ExampleArgs struct {
-	X int
+// AssignTaskRequest -> request for go rpc call AssignTask
+type AssignTaskRequest struct {
+	WorkerID string
 }
 
-type ExampleReply struct {
-	Y int
+// AssignTaskResponse -> response for go rpc call AssignTask
+type AssignTaskResponse struct {
+	TaskNum     int
+	TaskType    int
+	Files       []string
+	MasterState int
+	NumReducers int
+}
+
+//WorkerHeartBeatRequest ...
+type WorkerHeartBeatRequest struct {
+	WorkerID string
+}
+
+//WorkerHeartBeatResponse ....
+type WorkerHeartBeatResponse struct {
+	MasterState int
+}
+
+//SuccessRequest ...
+type SuccessRequest struct {
+	WorkerID string
+	Files    []string
+	TaskNum  int
+}
+
+//SuccessResponse ...
+type SuccessResponse struct {
+	MasterState int
 }
 
 // Add your RPC definitions here.
-
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the master.
