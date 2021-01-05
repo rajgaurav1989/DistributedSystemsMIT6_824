@@ -17,14 +17,17 @@ package raft
 //   in the same server.
 //
 
-import "sync"
-import "sync/atomic"
-import "../labrpc"
+import (
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"../labrpc"
+)
 
 // import "bytes"
 // import "../labgob"
-
-
 
 //
 // as each Raft peer becomes aware that successive log entries are
@@ -37,6 +40,13 @@ import "../labrpc"
 // snapshots) on the applyCh; at that point you can add fields to
 // ApplyMsg, but set CommandValid to false for these other uses.
 //
+
+const (
+	candidateState = "CANDIDATE"
+	followerState  = "FOLLOWER"
+	leaderState    = "LEADER"
+)
+
 type ApplyMsg struct {
 	CommandValid bool
 	Command      interface{}
@@ -47,16 +57,26 @@ type ApplyMsg struct {
 // A Go object implementing a single Raft peer.
 //
 type Raft struct {
-	mu        sync.Mutex          // Lock to protect shared access to this peer's state
-	peers     []*labrpc.ClientEnd // RPC end points of all peers
-	persister *Persister          // Object to hold this peer's persisted state
-	me        int                 // this peer's index into peers[]
-	dead      int32               // set by Kill()
-
+	mu              sync.Mutex          // Lock to protect shared access to this peer's state
+	peers           []*labrpc.ClientEnd // RPC end points of all peers
+	persister       *Persister          // Object to hold this peer's persisted state
+	me              int                 // this peer's index into peers[]
+	dead            int32               // set by Kill()
+	state           string
+	lastHeartBeat   int64 // in millis
+	electionTimeOut int64
+	currentTerm     int
+	lastLogIndex    int
+	lastLogTerm     int
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
+}
+
+type LogEntry struct {
+	Command interface{}
+	LogTerm int
 }
 
 // return currentTerm and whether this server
@@ -65,7 +85,7 @@ func (rf *Raft) GetState() (int, bool) {
 
 	var term int
 	var isleader bool
-	// Your code here (2A).
+
 	return term, isleader
 }
 
@@ -84,7 +104,6 @@ func (rf *Raft) persist() {
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
 }
-
 
 //
 // restore previously persisted state.
@@ -108,14 +127,15 @@ func (rf *Raft) readPersist(data []byte) {
 	// }
 }
 
-
-
-
 //
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
 //
 type RequestVoteArgs struct {
+	CandidateTerm         int
+	CandidateID           int
+	CandidateLastLogTerm  int
+	CandidateLastLogIndex int
 	// Your data here (2A, 2B).
 }
 
@@ -124,6 +144,9 @@ type RequestVoteArgs struct {
 // field names must start with capital letters!
 //
 type RequestVoteReply struct {
+	CurrentTerm int
+	VoteGranted bool
+
 	// Your data here (2A).
 }
 
@@ -168,7 +191,6 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return ok
 }
 
-
 //
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
@@ -189,7 +211,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := true
 
 	// Your code here (2B).
-
 
 	return index, term, isLeader
 }
@@ -238,6 +259,36 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
-
 	return rf
+}
+
+func periodicHeartBeatListener(rf Raft) {
+	if !strings.EqualFold(rf.state, leaderState) {
+		for {
+			currentTime := int64(time.Nanosecond) * time.Now().UnixNano() / int64(time.Millisecond)
+			voteCount := 1
+			if currentTime-rf.lastHeartBeat > rf.electionTimeOut {
+				rf.state = candidateState
+				for i := 0; i < len(rf.peers); i++ {
+					if i == rf.me {
+						continue
+					}
+					request := RequestVoteArgs{
+						CandidateID:           rf.me,
+						CandidateTerm:         rf.currentTerm,
+						CandidateLastLogIndex: rf.lastLogIndex,
+						CandidateLastLogTerm:  rf.lastLogTerm,
+					}
+					reply := RequestVoteReply{}
+					rf.sendRequestVote(rf.me, &request, &reply)
+					if reply.VoteGranted {
+						voteCount++
+					}
+					//if vote count is greater that ceil(N/2) change state to leader
+					// in appendRPC call change from Candidate to follower
+				}
+			}
+			time.Sleep(1 * time.Second)
+		}
+	}
 }
